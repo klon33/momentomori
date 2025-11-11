@@ -45,9 +45,12 @@ jobs:
       - name: Build Docker image
         run: docker compose -p momentomori -f docker-compose.yml build
 
+      - name: List Docker images (debug)
+        run: docker images | grep momentomori
+
       - name: Save Docker image artifact
         run: |
-          docker save "$APP_IMAGE" -o app_image.tar
+          docker save momentomori-app:latest -o app_image.tar
 
       - name: Deploy to Server
         uses: appleboy/scp-action@master
