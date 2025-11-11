@@ -1,0 +1,133 @@
+name: MomentoMori Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-start:
+    name: Deploy Start
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      start_time: ${{ steps.set_start_time.outputs.start_time }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set deployment start time
+        id: set_start_time
+        run: |
+          echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+      - name: Send Deploy Start Notification
+        uses: appleboy/telegram-action@master
+        with:
+          to: "-1002335330675"
+          token: ${{ secrets.TELEGRAM_DEPLOY_TOKEN_BOT }}
+          message: |
+            🚀 Начинается деплой MomentoMori на production
+
+            Репозиторий: ${{ github.repository }}
+            Commit: ${{ github.event.head_commit.message }}
+            Branch: ${{ github.ref_name }}
+            Author: ${{ github.event.head_commit.author.name }}
+
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [deploy-start]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set docker image name
+        run: |
+          echo "APP_IMAGE=momentomori-app" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: docker compose -p momentomori -f docker-compose.yml build
+
+      - name: Save Docker image artifact
+        run: |
+          docker save "$APP_IMAGE" -o app_image.tar
+
+      - name: Deploy to Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.BEGET_HOST }}
+          username: "root"
+          key: ${{ secrets.BEGET_SSH_PRIVATE_KEY }}
+          passphrase: "428"
+          source: "app_image.tar,templates,momento.svg,Dockerfile,docker-compose.yml,.dockerignore"
+          target: "/docker-compose/momentomori"
+          overwrite: true
+
+      - name: Start Application
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.BEGET_HOST }}
+          username: "root"
+          key: ${{ secrets.BEGET_SSH_PRIVATE_KEY }}
+          passphrase: "428"
+          script: |
+            cd /docker-compose/momentomori
+
+            COMPOSE_CMD="docker-compose -p momentomori -f docker-compose.yml"
+
+            $COMPOSE_CMD down || true
+
+            if [ -f app_image.tar ]; then
+              echo "📦 Загрузка образа приложения..."
+              docker load -i app_image.tar
+              rm app_image.tar
+            else
+              echo "⚠️ Предупреждение: файл app_image.tar не найден."
+            fi
+
+            echo "🚀 Запуск контейнера..."
+            $COMPOSE_CMD up -d
+
+            sleep 10
+            echo "📊 Статус контейнера:"
+            $COMPOSE_CMD ps
+
+            echo ""
+            echo "📝 Логи приложения:"
+            docker logs momentomori-app --tail=30
+
+      - name: Calculate deployment time
+        id: deploy-time
+        if: success() || failure()
+        run: echo "time=$(expr $(date +%s) - ${{ needs.deploy-start.outputs.start_time }}) секунд" >> $GITHUB_OUTPUT
+
+      - name: Send Success Notification
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: "-1002335330675"
+          token: ${{ secrets.TELEGRAM_DEPLOY_TOKEN_BOT }}
+          message: |
+            ✅ Деплой MomentoMori успешно завершен!
+
+            📦 Развернут контейнер:
+            • momentomori-app (Go приложение на порту 2129)
+
+            Репозиторий: https://github.com/${{ github.repository }}
+            Commit: ${{ github.event.head_commit.message }}
+            Branch: ${{ github.ref_name }}
+            Author: ${{ github.event.head_commit.author.name }}
+            ⏱️ Время выполнения: ${{ steps.deploy-time.outputs.time }}
+
+      - name: Send Failure Notification
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: "-1002335330675"
+          token: ${{ secrets.TELEGRAM_DEPLOY_TOKEN_BOT }}
+          message: |
+            ❌ Ошибка при деплое MomentoMori!
+
+            Репозиторий: https://github.com/${{ github.repository }}
+            Commit: ${{ github.event.head_commit.message }}
+            Branch: ${{ github.ref_name }}
+            Author: ${{ github.event.head_commit.author.name }}
+            Подробности: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ⏱️ Время выполнения до ошибки: ${{ steps.deploy-time.outputs.time }}
