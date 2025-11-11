@@ -4,6 +4,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: momentomori-app
     container_name: momentomori-app
     ports:
       - "2129:2129"
