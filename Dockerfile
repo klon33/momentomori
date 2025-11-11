@@ -33,8 +33,8 @@ COPY --from=builder /app/templates ./templates
 # Copy static files (momento.svg)
 COPY --from=builder /app/momento.svg ./momento.svg
 
-# Expose port 8080
-EXPOSE 8080
+# Expose port 2129
+EXPOSE 2129
 
 # Run the application
 CMD ["./main"]
